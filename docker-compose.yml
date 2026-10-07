@@ -1,0 +1,94 @@
+# Compose 提供离线验证入口。
+#
+# 镜像只内置 cryptography（解析 + 单张验签），验证逻辑是本仓库自研的
+# 受限 RFC 5280 路径验证；不做撤销、证书策略、OCSP/AIA 抓取，也不调用
+# cryptography 的完整路径验证器。
+#
+# 典型用法（镜像内自带 demo PKI，亦可挂载你自己的 secrets 卷）：
+#
+#   docker compose build verifier
+#
+#   # 1) 交叉签发场景：固定“好分支”的锚 root-b -> 接受
+#   PIN_ROOT_B=$(awk -F'= ' '/root-b.pem/{print $2}' demo/pins.txt) \
+#       docker compose run --rm cross-good
+#
+#   # 2) 同样的 leaf/中间证书，固定“坏分支”的锚 root-a -> 拒绝（NC 排除）
+#   PIN_ROOT_A=$(awk -F'= ' '/root-a.pem/{print $2}' demo/pins.txt) \
+#       docker compose run --rm cross-bad
+#
+#   # 3) self-issued 换钥链 -> 接受
+#   PIN_ROLLOVER_ROOT=$(awk -F'= ' '/root.pem/{print $2}' demo/pins.txt) \
+#       docker compose run --rm rollover
+#
+#   # 4) 通用离线验证（通过环境变量注入；不映射任何网络）
+#   docker compose run --rm \
+#       -e ANCHOR=/run/secrets/anchor.pem \
+#       -e PIN=<anchor-der-sha256> \
+#       -e SERVER=/run/secrets/server.pem \
+#       -e 'INTERMEDIATES=/run/secrets/ca1.pem /run/secrets/ca2.pem' \
+#       -e AT_TIME=2026-06-01T00:00:00Z \
+#       -e NAME=www.example.com \
+#       verifier
+
+x-verifier-base: &verifier-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: x509verify:offline
+  entrypoint: ["/usr/local/bin/x509-verify"]
+  # 不接入任何网络：离线验证入口不允许任何出站连接
+  network_mode: "none"
+  environment:
+    PYTHONHASHSEED: "0"
+
+services:
+  # 通用验证器：参数全部由环境变量提供（见 scripts/verify.sh）
+  verifier:
+    <<: *verifier-base
+    volumes:
+      - type: volume
+        source: secrets
+        target: /run/secrets
+        read_only: true
+
+  # 交叉签发场景：固定“好分支”锚 root-b，leaf 必须接受
+  cross-good:
+    <<: *verifier-base
+    environment:
+      PYTHONHASHSEED: "0"
+      ANCHOR: /app/demo/cross/root-b.pem
+      # 摘要由 scripts/make_demo_pki.py 生成，见 demo/pins.txt
+      PIN: ${PIN_ROOT_B:?set PIN_ROOT_B from demo/pins.txt}
+      SERVER: /app/demo/cross/leaf-example.pem
+      INTERMEDIATES: /app/demo/cross/intermediates.pem
+      AT_TIME: "2026-06-01T00:00:00Z"
+      NAME: "www.example.com"
+
+  # 同一套证书固定“坏分支”锚 root-a：唯一接锚链被 NC 排除，必须拒绝
+  cross-bad:
+    <<: *verifier-base
+    environment:
+      PYTHONHASHSEED: "0"
+      ANCHOR: /app/demo/cross/root-a.pem
+      PIN: ${PIN_ROOT_A:?set PIN_ROOT_A from demo/pins.txt}
+      SERVER: /app/demo/cross/leaf-example.pem
+      INTERMEDIATES: /app/demo/cross/intermediates.pem
+      AT_TIME: "2026-06-01T00:00:00Z"
+      NAME: "www.example.com"
+
+  # self-issued 换钥节点（旧钥签新钥）+ 换钥后 ICA -> leaf
+  rollover:
+    <<: *verifier-base
+    environment:
+      PYTHONHASHSEED: "0"
+      ANCHOR: /app/demo/rollover/root.pem
+      PIN: ${PIN_ROLLOVER_ROOT:?set PIN_ROLLOVER_ROOT from demo/pins.txt}
+      SERVER: /app/demo/rollover/leaf.pem
+      INTERMEDIATES: >-
+        /app/demo/rollover/rollover-self-issued.pem
+        /app/demo/rollover/ica.pem
+      AT_TIME: "2026-06-01T00:00:00Z"
+      NAME: "svc.example.org"
+
+volumes:
+  secrets:

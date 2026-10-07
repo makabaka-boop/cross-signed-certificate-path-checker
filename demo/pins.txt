@@ -1,0 +1,9 @@
+# 演示信任锚 DER 摘要（SHA-256，小写十六进制）
+# 用 --pin 固定；锚文件本身即使被替换，摘要不符即退出码 2。
+
+[cross]
+root-a.pem = 45b76177fdd75beb8e76743a4727c71bfbe01d7a24a9821fbcec8d249d62590a
+root-b.pem = 4e72c348615b72963d913624f34945fd41eedbc88840b16b4baa587ef9faaf64
+
+[rollover]
+root.pem   = 7288fdda5a3ccd6c61d3f1c86d5eaa48da75f63d00f70c881d67a805ee2c5243

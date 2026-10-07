@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "x509verify"
+version = "1.0.0"
+description = "受限 X.509 路径验证（P-256/ECDSA-SHA256、纯 DNS、离线、自研路径裁决）"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["cryptography>=42,<51"]
+
+[project.scripts]
+x509verify = "x509verify.cli:main"
+
+[tool.setuptools]
+packages = ["x509verify"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
